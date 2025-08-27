@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome</title>
+    <style>body { font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; } a { margin-right: 15px; }</style>
+</head>
+<body>
+    <h1>Welcome to the Flask MFA App!</h1>
+    <p>This is the public landing page.</p>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div style="color: green;">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    <hr>
+    <a href="{{ url_for('signup') }}">Sign Up</a>
+    <a href="{{ url_for('login') }}">Login</a>
+</body>
+</html>
