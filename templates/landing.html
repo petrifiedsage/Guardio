@@ -3,21 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome</title>
-    <style>body { font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; } a { margin-right: 15px; }</style>
+    <title>Guardio - Secure Your Digital Life</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <h1>Welcome to the Flask MFA App!</h1>
-    <p>This is the public landing page.</p>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div style="color: green;">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-    <hr>
-    <a href="{{ url_for('signup') }}">Sign Up</a>
-    <a href="{{ url_for('login') }}">Login</a>
+
+    <header class="header">
+        <div class="container">
+            <nav class="nav">
+                <a href="{{ url_for('landing') }}" class="logo">Guardio</a>
+                <div class="nav-links">
+                    <a href="{{ url_for('login') }}">Sign In</a>
+                    <a href="{{ url_for('signup') }}" class="btn btn-primary">Get Started</a>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="container">
+                <h1>Keep your files safe and private</h1>
+                <p>With Guardio's end-to-end encrypted cloud storage, no one but you and the people you choose can access your files — not even us.</p>
+                
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                  {% if messages %}
+                    <div class="flashed-messages">
+                      {% for category, message in messages %}
+                        <div class="flash-{{ category }}">{{ message }}</div>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                {% endwith %}
+
+                <div class="hero-buttons">
+                    <a href="{{ url_for('signup') }}" class="btn btn-primary">Create a free account</a>
+                    <a href="#" class="btn btn-secondary">Compare plans</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="product-image-section">
+            <div class="container">
+                <!-- Placeholder for an image similar to the one you showed -->
+                <img src="https://placehold.co/1000x600/EFEFEF/333333?text=Your+App+Screenshot" alt="Guardio App Interface" class="product-image">
+            </div>
+        </section>
+    </main>
+
 </body>
 </html>
+    
