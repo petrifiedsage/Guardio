@@ -1,29 +1,25 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login</title>
-    <style>body { font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; } input { display: block; margin-bottom: 10px; width: 95%; padding: 8px; } button { padding: 10px 15px; }</style>
-</head>
-<body>
-    <h1>Login</h1>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div style="color: {% if category == 'danger' %}red{% else %}green{% endif %};">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
+{% extends "base.html" %}
+{% block title %}Login - Guardio{% endblock %}
+{% block content %}
+<div class="content-card form-container">
+    <h1>Sign in</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+        {% for category, message in messages %}<div class="flash-{{ category }}">{{ message }}</div>{% endfor %}
+    {% endif %}{% endwith %}
     <form method="post">
-        <label for="username">Username:</label>
-        <input type="text" id="username" name="username" required>
-        <label for="password">Password:</label>
-        <input type="password" id="password" name="password" required>
-        <label for="otp">2FA Token (OTP):</label>
-        <input type="text" id="otp" name="otp" required minlength="6" maxlength="6" pattern="\d{6}">
-        <button type="submit">Login</button>
+        <div class="form-section">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required>
+        </div>
+        <div class="form-section">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        <div class="form-section">
+            <label for="otp">2FA Token (OTP)</label>
+            <input type="text" id="otp" name="otp" required minlength="6" maxlength="6" pattern="\d{6}">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Sign in</button>
     </form>
-     <p>Don't have an account? <a href="{{ url_for('signup') }}">Sign up here</a>.</p>
-</body>
-</html>
+</div>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}User Details - Guardio{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <h1>Details for {{ user.username }}</h1>
+    <p>Viewing stored item metadata. Content remains encrypted and inaccessible.</p>
+
+    <div class="file-manager" style="margin-top: 20px;">
+        <h3>Stored Files</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Folder</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for file in user.files %}
+                <tr>
+                    <td>{{ file.filename }}</td>
+                    <td>{{ file.folder.name if file.folder else 'Root' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="2" style="text-align: center;">No files stored.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="file-manager" style="margin-top: 30px;">
+        <h3>Stored Passwords</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Website</th>
+                    <th>Username</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in user.password_entries %}
+                <tr>
+                    <td>{{ entry.website }}</td>
+                    <td>{{ entry.username }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="2" style="text-align: center;">No passwords stored.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,59 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Guardio - Secure Your Digital Life</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-</head>
-<body>
+{% extends "base.html" %}
 
-    <header class="header">
-        <div class="container">
-            <nav class="nav">
-                <a href="{{ url_for('landing') }}" class="logo">Guardio</a>
-                <div class="nav-links">
-                    <a href="{{ url_for('login') }}">Sign In</a>
-                    <a href="{{ url_for('signup') }}" class="btn btn-primary">Get Started</a>
-                </div>
-            </nav>
-        </div>
-    </header>
+{% block title %}Guardio - Secure Your Digital Life{% endblock %}
 
-    <main>
-        <section class="hero">
-            <div class="container">
-                <h1>Keep your files safe and private</h1>
-                <p>With Guardio's end-to-end encrypted cloud storage, no one but you and the people you choose can access your files — not even us.</p>
-                
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                  {% if messages %}
-                    <div class="flashed-messages">
-                      {% for category, message in messages %}
-                        <div class="flash-{{ category }}">{{ message }}</div>
-                      {% endfor %}
-                    </div>
-                  {% endif %}
-                {% endwith %}
+{% block content %}
+<div class="hero">
+    <h1>A better internet starts with privacy and freedom</h1>
+    <p>Take control of your data with Guardio's end-to-end encryption.</p>
 
-                <div class="hero-buttons">
-                    <a href="{{ url_for('signup') }}" class="btn btn-primary">Create a free account</a>
-                    <a href="#" class="btn btn-secondary">Compare plans</a>
-                </div>
-            </div>
-        </section>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
 
-        <section class="product-image-section">
-            <div class="container">
-                <!-- Placeholder for an image similar to the one you showed -->
-                <img src="https://placehold.co/1000x600/EFEFEF/333333?text=Your+App+Screenshot" alt="Guardio App Interface" class="product-image">
-            </div>
-        </section>
-    </main>
-
-</body>
-</html>
-    
+    <div class="hero-buttons">
+        <a href="{{ url_for('signup') }}" class="btn btn-primary">Create a free account</a>
+        <a href="#" class="btn btn-secondary">Compare plans</a>
+    </div>
+</div>
+{% endblock %}

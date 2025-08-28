@@ -2,8 +2,9 @@ import os
 import base64
 import io
 from dotenv import load_dotenv
+from functools import wraps
 
-from flask import Flask, render_template, redirect, url_for, request, flash, send_file, abort
+from flask import Flask, render_template, redirect, url_for, request, flash, send_file, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -27,7 +28,7 @@ app.config['SECRET_KEY'] = SECRET_KEY
 
 # Configure the SQLite database
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///mfa_app.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_TRACK_MODifications'] = False
 
 # --- Encryption Setup ---
 ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY')
@@ -43,6 +44,16 @@ bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
+# --- RBAC Decorator ---
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role != 'admin':
+            flash("You do not have permission to access this page.", "danger")
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 # --- Database Models ---
 
 class User(UserMixin, db.Model):
@@ -52,10 +63,13 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=True)
     password_hash = db.Column(db.String(128), nullable=False)
     otp_secret = db.Column(db.String(16), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='user') # User role for RBAC
     
     # Relationships
     files = db.relationship('File', backref='owner', lazy=True, cascade="all, delete-orphan")
     folders = db.relationship('Folder', backref='owner', lazy=True, cascade="all, delete-orphan")
+    password_entries = db.relationship('PasswordEntry', backref='owner', lazy=True, cascade="all, delete-orphan")
+
 
     def __repr__(self):
         return f'<User {self.username}>'
@@ -66,7 +80,6 @@ class Folder(db.Model):
     name = db.Column(db.String(100), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     
-    # Self-referential relationship for nested folders
     parent_id = db.Column(db.Integer, db.ForeignKey('folder.id'))
     parent = db.relationship('Folder', remote_side=[id], backref='subfolders')
     
@@ -82,10 +95,21 @@ class File(db.Model):
     filename = db.Column(db.String(150), nullable=False)
     data = db.Column(db.LargeBinary, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    folder_id = db.Column(db.Integer, db.ForeignKey('folder.id')) # Link to a folder
+    folder_id = db.Column(db.Integer, db.ForeignKey('folder.id'))
 
     def __repr__(self):
         return f'<File {self.filename}>'
+
+class PasswordEntry(db.Model):
+    """Model for storing encrypted password entries."""
+    id = db.Column(db.Integer, primary_key=True)
+    website = db.Column(db.String(150), nullable=False)
+    username = db.Column(db.String(150), nullable=False)
+    encrypted_password = db.Column(db.LargeBinary, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    def __repr__(self):
+        return f'<PasswordEntry {self.website}>'
 
 
 # --- Flask-Login User Loader ---
@@ -94,7 +118,7 @@ class File(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- Routes ---
+# --- Standard Routes (Login, Signup, etc.) ---
 
 @app.route('/')
 def landing():
@@ -102,7 +126,6 @@ def landing():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    # ... (Signup logic remains the same)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -111,11 +134,25 @@ def signup():
         if existing_user:
             flash('Username or email already exists. Please choose another.', 'danger')
             return redirect(url_for('signup'))
+        
         hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
         otp_secret = pyotp.random_base32()
-        new_user = User(username=username, password_hash=hashed_password, email=email, otp_secret=otp_secret)
+        
+        # Determine role: first user is admin
+        role = 'admin' if User.query.count() == 0 else 'user'
+
+        new_user = User(
+            username=username, 
+            password_hash=hashed_password, 
+            email=email, 
+            otp_secret=otp_secret,
+            role=role
+        )
         db.session.add(new_user)
         db.session.commit()
+
+        flash(f'Account created successfully! Your role is: {role}. Please set up MFA.', 'success')
+
         provisioning_uri = pyotp.totp.TOTP(otp_secret).provisioning_uri(name=username, issuer_name='FlaskMFAApp')
         qr_img = qrcode.make(provisioning_uri)
         buffered = io.BytesIO()
@@ -127,7 +164,6 @@ def signup():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # ... (Login logic remains the same)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -152,37 +188,28 @@ def login():
 @app.route('/dashboard/folder/<int:folder_id>', methods=['GET', 'POST'])
 @login_required
 def dashboard(folder_id):
-    """Main dashboard view, acts as the file manager."""
     current_folder = None
     if folder_id:
         current_folder = Folder.query.get_or_404(folder_id)
-        # Security check: ensure user owns the folder
         if current_folder.user_id != current_user.id:
             abort(403)
 
-    # Handle file upload
     if request.method == 'POST' and 'file' in request.files:
         file = request.files['file']
         if file.filename == '':
             flash('No selected file', 'danger')
         elif file:
             encrypted_data = fernet.encrypt(file.read())
-            new_file = File(
-                filename=file.filename,
-                data=encrypted_data,
-                owner=current_user,
-                folder_id=folder_id
-            )
+            new_file = File(filename=file.filename, data=encrypted_data, owner=current_user, folder_id=folder_id)
             db.session.add(new_file)
             db.session.commit()
             flash('File uploaded and encrypted successfully!', 'success')
         return redirect(url_for('dashboard', folder_id=folder_id))
 
-    # Get contents for the current folder view
     if current_folder:
         folders = current_folder.subfolders
         files = current_folder.files
-    else: # Root directory
+    else:
         folders = Folder.query.filter_by(user_id=current_user.id, parent_id=None).all()
         files = File.query.filter_by(user_id=current_user.id, folder_id=None).all()
 
@@ -194,21 +221,26 @@ def dashboard(folder_id):
 def create_folder():
     """Creates a new folder."""
     folder_name = request.form.get('folder_name')
-    parent_folder_id = request.form.get('parent_id') # Can be None for root
+    parent_folder_id = request.form.get('parent_id')
     
     if not folder_name:
         flash('Folder name cannot be empty.', 'danger')
     else:
+        parent_id = int(parent_folder_id) if parent_folder_id else None
+        
         new_folder = Folder(
             name=folder_name,
             owner=current_user,
-            parent_id=parent_folder_id if parent_folder_id else None
+            parent_id=parent_id
         )
         db.session.add(new_folder)
         db.session.commit()
         flash(f'Folder "{folder_name}" created successfully.', 'success')
 
-    return redirect(url_for('dashboard', folder_id=parent_folder_id))
+    if parent_folder_id:
+        return redirect(url_for('dashboard', folder_id=parent_folder_id))
+    else:
+        return redirect(url_for('dashboard'))
 
 @app.route('/download/<int:file_id>')
 @login_required
@@ -230,7 +262,6 @@ def delete_file(file_id):
     file_to_delete = File.query.get_or_404(file_id)
     if file_to_delete.user_id != current_user.id:
         abort(403)
-    
     parent_folder_id = file_to_delete.folder_id
     db.session.delete(file_to_delete)
     db.session.commit()
@@ -243,31 +274,104 @@ def delete_folder(folder_id):
     folder_to_delete = Folder.query.get_or_404(folder_id)
     if folder_to_delete.user_id != current_user.id:
         abort(403)
-    
-    # Basic check: prevent deleting non-empty folders for simplicity
     if folder_to_delete.subfolders or folder_to_delete.files.first():
         flash('Cannot delete a non-empty folder.', 'danger')
         return redirect(url_for('dashboard', folder_id=folder_id))
-
     parent_folder_id = folder_to_delete.parent_id
     db.session.delete(folder_to_delete)
     db.session.commit()
     flash('Folder deleted successfully.', 'success')
     return redirect(url_for('dashboard', folder_id=parent_folder_id))
 
+# --- Password Manager Routes ---
+
+@app.route('/password-manager')
+@login_required
+def password_manager():
+    """Displays the password manager page."""
+    entries = PasswordEntry.query.filter_by(user_id=current_user.id).all()
+    return render_template('password_manager.html', entries=entries)
+
+@app.route('/add-password', methods=['POST'])
+@login_required
+def add_password():
+    """Adds a new password entry."""
+    website = request.form.get('website')
+    username = request.form.get('username')
+    password = request.form.get('password')
+
+    if not all([website, username, password]):
+        flash('All fields are required.', 'danger')
+    else:
+        encrypted_password = fernet.encrypt(password.encode())
+        new_entry = PasswordEntry(
+            website=website,
+            username=username,
+            encrypted_password=encrypted_password,
+            owner=current_user
+        )
+        db.session.add(new_entry)
+        db.session.commit()
+        flash('Password entry added successfully!', 'success')
+    
+    return redirect(url_for('password_manager'))
+
+@app.route('/reveal-password/<int:entry_id>')
+@login_required
+def reveal_password(entry_id):
+    """Decrypts and returns a password."""
+    entry = PasswordEntry.query.get_or_404(entry_id)
+    if entry.user_id != current_user.id:
+        abort(403)
+    
+    decrypted_password = fernet.decrypt(entry.encrypted_password).decode()
+    return jsonify({'password': decrypted_password})
+
+@app.route('/delete-password/<int:entry_id>', methods=['POST'])
+@login_required
+def delete_password(entry_id):
+    """Deletes a password entry."""
+    entry = PasswordEntry.query.get_or_404(entry_id)
+    if entry.user_id != current_user.id:
+        abort(403)
+    
+    db.session.delete(entry)
+    db.session.commit()
+    flash('Password entry deleted successfully.', 'success')
+    return redirect(url_for('password_manager'))
+
+
+# --- Admin Routes ---
+
+@app.route('/admin')
+@login_required
+@admin_required
+def admin_dashboard():
+    """Displays the admin dashboard with a list of all users."""
+    users = User.query.all()
+    return render_template('admin_dashboard.html', users=users)
+
+@app.route('/admin/user/<int:user_id>')
+@login_required
+@admin_required
+def user_details(user_id):
+    """Displays the details of a specific user's stored items."""
+    user = User.query.get_or_404(user_id)
+    # The admin can see the files and password entries, but not the encrypted data itself.
+    return render_template('user_details.html', user=user)
+
+
+# --- General Routes ---
 
 @app.route('/users')
 @login_required
 def users():
-    """Serves the page that lists all registered users."""
     all_users = User.query.all()
     return render_template('users.html', users=all_users)
-
 
 @app.route('/logout')
 @login_required
 def logout():
-    """Logs the current user out."""
     logout_user()
     flash('You have been logged out.', 'info')
     return redirect(url_for('landing'))
