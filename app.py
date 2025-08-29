@@ -9,7 +9,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from cryptography.fernet import Fernet
-from sqlalchemy.orm import backref
+import google.generativeai as genai
 
 import pyotp
 import qrcode
@@ -20,25 +20,25 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Load secret key from environment variable.
+# Load keys from environment variables
 SECRET_KEY = os.getenv('SECRET_KEY')
-if not SECRET_KEY:
-    raise ValueError("Error: SECRET_KEY not set. Make sure it's in your .env file.")
-app.config['SECRET_KEY'] = SECRET_KEY
-
-# Configure the SQLite database
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///mfa_app.db'
-app.config['SQLALCHEMY_TRACK_MODifications'] = False
-
-# --- Encryption Setup ---
 ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY')
-if not ENCRYPTION_KEY:
-    raise ValueError("Error: ENCRYPTION_KEY not set. Make sure it's in your .env file.")
-fernet = Fernet(ENCRYPTION_KEY.encode())
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
+if not all([SECRET_KEY, ENCRYPTION_KEY, GEMINI_API_KEY]):
+    raise ValueError("One or more required environment variables are not set.")
+
+app.config['SECRET_KEY'] = SECRET_KEY
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///mfa_app.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_timeout': 30}
+
+
+# --- AI and Encryption Setup ---
+fernet = Fernet(ENCRYPTION_KEY.encode())
+genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Extensions Initialization ---
-
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
@@ -54,62 +54,52 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def analyze_file_with_ai(file_data, filename):
+    """Sends file content to Gemini for analysis."""
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        content_preview = file_data.decode('utf-8', errors='ignore')
+        prompt = f"Analyze the following file content from a file named '{filename}'. Provide a one-sentence summary and state if it appears safe or potentially malicious. Content preview: {content_preview[:2000]}"
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"AI analysis failed: {e}")
+        return "AI analysis could not be performed due to an error."
 # --- Database Models ---
 
-class User(UserMixin, db.Model):
-    """User model for storing user details."""
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=True)
     password_hash = db.Column(db.String(128), nullable=False)
     otp_secret = db.Column(db.String(16), nullable=False)
-    role = db.Column(db.String(20), nullable=False, default='user') # User role for RBAC
-    
-    # Relationships
+    role = db.Column(db.String(20), nullable=False, default='user')
     files = db.relationship('File', backref='owner', lazy=True, cascade="all, delete-orphan")
     folders = db.relationship('Folder', backref='owner', lazy=True, cascade="all, delete-orphan")
     password_entries = db.relationship('PasswordEntry', backref='owner', lazy=True, cascade="all, delete-orphan")
 
-
-    def __repr__(self):
-        return f'<User {self.username}>'
-
 class Folder(db.Model):
-    """Folder model for organizing files."""
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    
     parent_id = db.Column(db.Integer, db.ForeignKey('folder.id'))
     parent = db.relationship('Folder', remote_side=[id], backref='subfolders')
-    
     files = db.relationship('File', backref='folder', lazy='dynamic', cascade="all, delete-orphan")
 
-    def __repr__(self):
-        return f'<Folder {self.name}>'
-
-
 class File(db.Model):
-    """File model for storing encrypted user files."""
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(150), nullable=False)
     data = db.Column(db.LargeBinary, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    folder_id = db.Column(db.Integer, db.ForeignKey('folder.id'))
-
-    def __repr__(self):
-        return f'<File {self.filename}>'
+    ai_summary = db.Column(db.Text, nullable=True)
+    folder_id = db.Column(db.Integer, db.ForeignKey('folder.id'), nullable=True)
 
 class PasswordEntry(db.Model):
-    """Model for storing encrypted password entries."""
     id = db.Column(db.Integer, primary_key=True)
     website = db.Column(db.String(150), nullable=False)
     username = db.Column(db.String(150), nullable=False)
     encrypted_password = db.Column(db.LargeBinary, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-
-    def __repr__(self):
-        return f'<PasswordEntry {self.website}>'
 
 
 # --- Flask-Login User Loader ---
@@ -130,15 +120,23 @@ def signup():
         username = request.form.get('username')
         password = request.form.get('password')
         email = request.form.get('email')
-        existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
-        if existing_user:
-            flash('Username or email already exists. Please choose another.', 'danger')
+
+        # FIX: Separate checks for username and email to handle blank emails correctly
+        user_by_username = User.query.filter_by(username=username).first()
+        if user_by_username:
+            flash('Username already exists. Please choose another.', 'danger')
             return redirect(url_for('signup'))
+
+        # Only check for email uniqueness if an email is provided
+        if email:
+            user_by_email = User.query.filter_by(email=email).first()
+            if user_by_email:
+                flash('Email already exists. Please choose another.', 'danger')
+                return redirect(url_for('signup'))
         
         hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
         otp_secret = pyotp.random_base32()
         
-        # Determine role: first user is admin
         role = 'admin' if User.query.count() == 0 else 'user'
 
         new_user = User(
@@ -196,24 +194,46 @@ def dashboard(folder_id):
 
     if request.method == 'POST' and 'file' in request.files:
         file = request.files['file']
+        analyze = request.form.get('analyze_file')
+
         if file.filename == '':
             flash('No selected file', 'danger')
-        elif file:
-            encrypted_data = fernet.encrypt(file.read())
-            new_file = File(filename=file.filename, data=encrypted_data, owner=current_user, folder_id=folder_id)
+            return redirect(request.url)
+
+        if file:
+            file_data = file.read()
+            encrypted_data = fernet.encrypt(file_data)
+            
+            ai_summary = None
+            if analyze:
+                try:
+                    decrypted_data_for_ai = fernet.decrypt(encrypted_data)
+                    ai_summary = analyze_file_with_ai(decrypted_data_for_ai, file.filename)
+                except Exception as e:
+                    ai_summary = f"Could not perform AI analysis. Error: {e}"
+
+            new_file = File(
+                filename=file.filename,
+                data=encrypted_data,
+                owner=current_user,
+                ai_summary=ai_summary,
+                folder_id=folder_id
+            )
             db.session.add(new_file)
             db.session.commit()
-            flash('File uploaded and encrypted successfully!', 'success')
+            flash('File uploaded successfully!', 'success')
+        
         return redirect(url_for('dashboard', folder_id=folder_id))
 
     if current_folder:
         folders = current_folder.subfolders
         files = current_folder.files
-    else:
+    else: 
         folders = Folder.query.filter_by(user_id=current_user.id, parent_id=None).all()
         files = File.query.filter_by(user_id=current_user.id, folder_id=None).all()
 
     return render_template('dashboard.html', files=files, folders=folders, current_folder=current_folder)
+
 
 
 @app.route('/create-folder', methods=['POST'])
