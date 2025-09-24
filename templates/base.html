@@ -28,6 +28,7 @@
                         <a href="{{ url_for('login') }}">Sign In</a>
                         <a href="{{ url_for('signup') }}" class="btn btn-primary">Create free account</a>
                     {% endif %}
+                    <button id="theme-toggle" class="btn btn-secondary" style="margin-left:16px;" aria-label="Toggle theme">🌓</button>
                 </div>
             </nav>
         </div>
@@ -37,5 +38,44 @@
         {% block content %}{% endblock %}
     </main>
 
+    <div id="toasts" class="toasts" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+    (function() {
+        const root = document.documentElement;
+        const key = 'guardio-theme';
+        const remembered = localStorage.getItem(key);
+        if (remembered === 'dark') {
+            root.classList.add('theme-dark');
+        }
+        const btn = document.getElementById('theme-toggle');
+        if (btn) {
+            btn.addEventListener('click', function() {
+                root.classList.toggle('theme-dark');
+                const isDark = root.classList.contains('theme-dark');
+                localStorage.setItem(key, isDark ? 'dark' : 'light');
+            });
+        }
+    })();
+
+    // Toasts: consume any flash messages in the DOM and render as floating toasts
+    (function() {
+        const container = document.getElementById('toasts');
+        if (!container) return;
+        // Jinja flashes are already injected in templates as .flash-*
+        // We enhance: find them, convert into toasts, then remove originals
+        const flashes = document.querySelectorAll('[class^="flash-"]');
+        flashes.forEach(function(el){
+            const type = Array.from(el.classList).find(c=>c.startsWith('flash-')) || 'flash-info';
+            const t = document.createElement('div');
+            t.className = 'toast ' + type;
+            t.textContent = el.textContent;
+            container.appendChild(t);
+            setTimeout(()=>{ t.classList.add('show'); }, 10);
+            setTimeout(()=>{ t.classList.remove('show'); t.addEventListener('transitionend', ()=> t.remove()); }, 3500);
+            el.remove();
+        });
+    })();
+</script>
 </body>
 </html>

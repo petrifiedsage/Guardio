@@ -8,7 +8,7 @@ from time import time
 from dotenv import load_dotenv
 from functools import wraps
 
-from flask import Flask, render_template, redirect, url_for, request, flash, send_file, abort, jsonify
+from flask import Flask, render_template, redirect, url_for, request, flash, send_file, abort, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -17,6 +17,7 @@ import google.generativeai as genai
 
 import pyotp
 import qrcode
+import secrets
 
 load_dotenv()
 
@@ -59,6 +60,11 @@ _request_counts = {}
 
 @app.before_request
 def _rate_limit_guard():
+    # Use effective limits (DB settings if present)
+    limits = get_effective_limits() if 'get_effective_limits' in globals() else {
+        'rate_limit_per_min': RATE_LIMIT_PER_MIN
+    }
+    limit = limits['rate_limit_per_min']
     identifier = None
     if current_user.is_authenticated:
         identifier = f"user:{current_user.id}"
@@ -67,8 +73,29 @@ def _rate_limit_guard():
     now = int(time() // 60)  # current minute bucket
     key = (identifier, now)
     _request_counts[key] = _request_counts.get(key, 0) + 1
-    if _request_counts[key] > RATE_LIMIT_PER_MIN:
+    if _request_counts[key] > limit:
         return abort(429)
+
+# --- CSRF Protection (simple) ---
+def _ensure_csrf_token():
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return token
+
+def _validate_csrf():
+    if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        sent = request.form.get('csrf_token') or request.headers.get('X-CSRFToken')
+        if not sent or sent != session.get('_csrf_token'):
+            abort(400)
+
+app.jinja_env.globals['csrf_token'] = _ensure_csrf_token
+
+@app.before_request
+def _csrf_before_request():
+    _ensure_csrf_token()
+    _validate_csrf()
 
 # --- RBAC Decorator ---
 def admin_required(f):
@@ -85,7 +112,24 @@ def allowed_file(filename):
     if not filename or '.' not in filename:
         return False
     ext = filename.rsplit('.', 1)[1].lower()
+    settings = AppSettings.query.first()
+    if settings:
+        return ext in settings.allowed_extensions_set()
     return ext in ALLOWED_EXTENSIONS
+
+def get_effective_limits():
+    settings = AppSettings.query.first()
+    if settings:
+        return {
+            'max_upload_mb': settings.max_upload_mb,
+            'allowed_extensions': settings.allowed_extensions_set(),
+            'rate_limit_per_min': settings.rate_limit_per_min,
+        }
+    return {
+        'max_upload_mb': int(os.getenv('MAX_UPLOAD_MB', '10')),
+        'allowed_extensions': ALLOWED_EXTENSIONS,
+        'rate_limit_per_min': RATE_LIMIT_PER_MIN,
+    }
 
 def analyze_file_with_ai(file_data, filename):
     """Sends file content to Gemini for analysis."""
@@ -165,6 +209,16 @@ class UserAuditMarker(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
     last_saved_block_index = db.Column(db.Integer, nullable=False, default=-1)
 
+
+class AppSettings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    max_upload_mb = db.Column(db.Integer, nullable=False, default=int(os.getenv('MAX_UPLOAD_MB', '10')))
+    allowed_extensions_csv = db.Column(db.String(255), nullable=False, default='txt,pdf,png,jpg,jpeg,gif')
+    rate_limit_per_min = db.Column(db.Integer, nullable=False, default=int(os.getenv('RATE_LIMIT_PER_MIN', '60')))
+
+    def allowed_extensions_set(self):
+        return {e.strip().lower() for e in (self.allowed_extensions_csv or '').split(',') if e.strip()}
+
 # --- Flask-Login User Loader ---
 
 @login_manager.user_loader
@@ -204,10 +258,12 @@ def append_audit(action, metadata=None, actor_user_id=None):
 
 @app.route('/')
 def landing():
+    """Landing page route rendering the product hero section."""
     return render_template('landing.html')
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
+    """User signup route with username/email uniqueness and MFA bootstrap."""
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -256,6 +312,7 @@ def signup():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    """User login with password and TOTP verification."""
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -283,6 +340,7 @@ def login():
 @app.route('/dashboard/folder/<int:folder_id>', methods=['GET', 'POST'])
 @login_required
 def dashboard(folder_id):
+    """User file dashboard supporting folder navigation and uploads."""
     current_folder = None
     if folder_id:
         current_folder = Folder.query.get_or_404(folder_id)
@@ -341,7 +399,7 @@ def dashboard(folder_id):
 @app.route('/create-folder', methods=['POST'])
 @login_required
 def create_folder():
-    """Creates a new folder."""
+    """Create a new folder for the current user; requires non-empty name."""
     folder_name = request.form.get('folder_name')
     parent_folder_id = request.form.get('parent_id')
     
@@ -369,7 +427,7 @@ def create_folder():
 @app.route('/download/<int:file_id>')
 @login_required
 def download_file(file_id):
-    """Handles file decryption and download."""
+    """Decrypt and stream a file owned by the current user."""
     file = File.query.get_or_404(file_id)
     if file.user_id != current_user.id:
         abort(403)
@@ -386,6 +444,7 @@ def download_file(file_id):
 @app.route('/delete/file/<int:file_id>', methods=['POST'])
 @login_required
 def delete_file(file_id):
+    """Delete a file the current user owns, auditing the action."""
     file_to_delete = File.query.get_or_404(file_id)
     if file_to_delete.user_id != current_user.id:
         abort(403)
@@ -400,6 +459,7 @@ def delete_file(file_id):
 @app.route('/delete/folder/<int:folder_id>', methods=['POST'])
 @login_required
 def delete_folder(folder_id):
+    """Delete an empty folder owned by the current user."""
     folder_to_delete = Folder.query.get_or_404(folder_id)
     if folder_to_delete.user_id != current_user.id:
         abort(403)
@@ -419,14 +479,14 @@ def delete_folder(folder_id):
 @app.route('/password-manager')
 @login_required
 def password_manager():
-    """Displays the password manager page."""
+    """Display the password manager page for the current user."""
     entries = PasswordEntry.query.filter_by(user_id=current_user.id).all()
     return render_template('password_manager.html', entries=entries)
 
 @app.route('/add-password', methods=['POST'])
 @login_required
 def add_password():
-    """Adds a new password entry."""
+    """Add a password entry (encrypted at rest) for the current user."""
     website = request.form.get('website')
     username = request.form.get('username')
     password = request.form.get('password')
@@ -452,7 +512,7 @@ def add_password():
 @app.route('/reveal-password/<int:entry_id>')
 @login_required
 def reveal_password(entry_id):
-    """Decrypts and returns a password."""
+    """Return decrypted password for an entry owned by the current user."""
     entry = PasswordEntry.query.get_or_404(entry_id)
     if entry.user_id != current_user.id:
         abort(403)
@@ -466,7 +526,7 @@ def reveal_password(entry_id):
 @app.route('/delete-password/<int:entry_id>', methods=['POST'])
 @login_required
 def delete_password(entry_id):
-    """Deletes a password entry."""
+    """Delete a password entry owned by the current user."""
     entry = PasswordEntry.query.get_or_404(entry_id)
     if entry.user_id != current_user.id:
         abort(403)
@@ -485,17 +545,18 @@ def delete_password(entry_id):
 @login_required
 @admin_required
 def admin_dashboard():
-    """Displays the admin dashboard with a list of all users."""
+    """Admin dashboard with system metrics and quick links."""
     users = User.query.all()
     total_users = User.query.count()
     total_files = File.query.count()
     total_passwords = PasswordEntry.query.count()
     latest_block = AuditBlock.query.order_by(AuditBlock.index.desc()).first()
     latest_index = latest_block.index if latest_block else -1
+    limits = get_effective_limits()
     config = {
-        'max_upload_mb': int(os.getenv('MAX_UPLOAD_MB', '10')),
-        'allowed_extensions': sorted(list(ALLOWED_EXTENSIONS)),
-        'rate_limit_per_min': RATE_LIMIT_PER_MIN,
+        'max_upload_mb': limits['max_upload_mb'],
+        'allowed_extensions': sorted(list(limits['allowed_extensions'])),
+        'rate_limit_per_min': limits['rate_limit_per_min'],
     }
     return render_template('admin_dashboard.html', users=users, total_users=total_users, total_files=total_files, total_passwords=total_passwords, latest_index=latest_index, config=config)
 
@@ -566,6 +627,74 @@ def admin_backup():
     db.session.commit()
     return send_file(io.BytesIO(payload.encode('utf-8')), as_attachment=True, download_name='guardio_admin_backup.json', mimetype='application/json')
 
+
+@app.route('/admin/settings', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def admin_settings():
+    settings = AppSettings.query.first()
+    if settings is None:
+        settings = AppSettings()
+        db.session.add(settings)
+        db.session.commit()
+    errors = {}
+    if request.method == 'POST':
+        raw_max = request.form.get('max_upload_mb', '').strip()
+        raw_ext = request.form.get('allowed_extensions_csv', '').strip()
+        raw_rate = request.form.get('rate_limit_per_min', '').strip()
+        max_upload_mb = settings.max_upload_mb
+        rate_limit_per_min = settings.rate_limit_per_min
+        allowed_extensions_csv = settings.allowed_extensions_csv
+        if not raw_max:
+            errors['max_upload_mb'] = 'Required.'
+        else:
+            try:
+                max_upload_mb = int(raw_max)
+                if max_upload_mb < 1 or max_upload_mb > 1024:
+                    errors['max_upload_mb'] = 'Must be between 1 and 1024.'
+            except ValueError:
+                errors['max_upload_mb'] = 'Must be a number.'
+        if not raw_rate:
+            errors['rate_limit_per_min'] = 'Required.'
+        else:
+            try:
+                rate_limit_per_min = int(raw_rate)
+                if rate_limit_per_min < 1 or rate_limit_per_min > 10000:
+                    errors['rate_limit_per_min'] = 'Must be between 1 and 10000.'
+            except ValueError:
+                errors['rate_limit_per_min'] = 'Must be a number.'
+        if not raw_ext:
+            errors['allowed_extensions_csv'] = 'Provide at least one extension.'
+        else:
+            parts = [p.strip().lower() for p in raw_ext.split(',') if p.strip()]
+            if not parts:
+                errors['allowed_extensions_csv'] = 'Provide at least one extension.'
+            elif any(not p.isalnum() for p in parts):
+                errors['allowed_extensions_csv'] = 'Extensions must be alphanumeric (e.g., pdf,jpg).'
+            else:
+                allowed_extensions_csv = ','.join(sorted(set(parts)))
+
+        if not errors:
+            changes = {}
+            if settings.max_upload_mb != max_upload_mb:
+                changes['max_upload_mb'] = {'from': settings.max_upload_mb, 'to': max_upload_mb}
+                settings.max_upload_mb = max_upload_mb
+                app.config['MAX_CONTENT_LENGTH'] = max_upload_mb * 1024 * 1024
+            if settings.allowed_extensions_csv != allowed_extensions_csv:
+                changes['allowed_extensions_csv'] = {'from': settings.allowed_extensions_csv, 'to': allowed_extensions_csv}
+                settings.allowed_extensions_csv = allowed_extensions_csv
+            if settings.rate_limit_per_min != rate_limit_per_min:
+                changes['rate_limit_per_min'] = {'from': settings.rate_limit_per_min, 'to': rate_limit_per_min}
+                settings.rate_limit_per_min = rate_limit_per_min
+            db.session.add(settings)
+            append_audit('ADMIN_SETTINGS_UPDATE', {'changes': changes}, actor_user_id=current_user.id)
+            db.session.commit()
+            flash('Settings updated.', 'success')
+            return redirect(url_for('admin_settings'))
+        else:
+            flash('Please correct the errors below.', 'danger')
+    return render_template('admin_settings.html', settings=settings, errors=errors)
+
 @app.route('/admin/user/<int:user_id>')
 @login_required
 @admin_required
@@ -588,8 +717,19 @@ def users():
 @login_required
 def audit_view():
     is_admin = getattr(current_user, 'role', 'user') == 'admin'
+    # Validate chain integrity (full chain)
+    all_blocks = AuditBlock.query.order_by(AuditBlock.index.asc()).all()
+    is_chain_valid = True
+    previous_hash = '0' * 64
+    for b in all_blocks:
+        timestamp_iso = b.timestamp.isoformat() + 'Z'
+        expected_hash = _compute_block_hash(b.index, timestamp_iso, b.actor_user_id, b.action, b.metadata_json, previous_hash)
+        if expected_hash != b.block_hash:
+            is_chain_valid = False
+            break
+        previous_hash = b.block_hash
     if is_admin:
-        blocks = AuditBlock.query.order_by(AuditBlock.index.asc()).all()
+        blocks = all_blocks
     else:
         # Show only GENESIS and blocks performed by the current user
         blocks = (
@@ -600,7 +740,7 @@ def audit_view():
         )
     marker = UserAuditMarker.query.filter_by(user_id=current_user.id).first()
     last_saved = marker.last_saved_block_index if marker else -1
-    return render_template('audit.html', blocks=blocks, last_saved=last_saved, is_admin=is_admin)
+    return render_template('audit.html', blocks=blocks, last_saved=last_saved, is_admin=is_admin, is_chain_valid=is_chain_valid)
 
 
 @app.route('/audit/export')

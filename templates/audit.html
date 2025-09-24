@@ -2,19 +2,40 @@
 {% block title %}Audit Blockchain - Guardio{% endblock %}
 {% block content %}
 <div class="content-card">
-    <h1>Audit Blockchain</h1>
+    <h1>Audit Blockchain
+        {% if blocks %}
+            {% if is_chain_valid %}
+            <span class="badge badge-ok" title="Chain integrity OK">⛓️ Verified</span>
+            {% else %}
+            <span class="badge" style="background:#ffe3e3;color:#8a0d0d;" title="Chain tamper detected">⛓️ Warning</span>
+            {% endif %}
+        {% endif %}
+    </h1>
     {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
         {% for category, message in messages %}<div class="flash-{{ category }}">{{ message }}</div>{% endfor %}
     {% endif %}{% endwith %}
 
     <div style="display: flex; gap: 10px; margin-bottom: 16px;">
         <form action="{{ url_for('audit_save_marker') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-primary">Save My Snapshot</button>
         </form>
         <a href="{{ url_for('audit_export') }}" class="btn btn-secondary">Export {{ 'Full' if is_admin else 'My' }} Chain (JSON)</a>
     </div>
 
     <p>Your last saved block index: <strong>{{ last_saved }}</strong></p>
+
+    {% if blocks %}
+    <details class="content-card" style="padding:16px; margin-bottom:16px;">
+        <summary><strong>Chain Integrity Details</strong></summary>
+        <p>This recomputes each block's hash using stored fields and compares with the saved hash. Any mismatch flags tampering.</p>
+        {% if is_chain_valid %}
+            <p><strong>Status:</strong> All blocks passed verification.</p>
+        {% else %}
+            <p><strong>Status:</strong> Warning — a mismatch was detected. Inspect block hashes below.</p>
+        {% endif %}
+    </details>
+    {% endif %}
 
     <div class="chain-container">
         {% for b in blocks %}

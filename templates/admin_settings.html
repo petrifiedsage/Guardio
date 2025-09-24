@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Settings - Guardio{% endblock %}
+
+{% block content %}
+<div class="content-card form-container">
+    <h1>Admin Settings</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+        {% for category, message in messages %}<div class="flash-{{ category }}">{{ message }}</div>{% endfor %}
+    {% endif %}{% endwith %}
+
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-section">
+            <label for="max_upload_mb">Max Upload Size (MB)</label>
+            <input type="number" id="max_upload_mb" name="max_upload_mb" min="1" value="{{ request.form.max_upload_mb or settings.max_upload_mb }}">
+            {% if errors and errors.get('max_upload_mb') %}
+            <div style="color:#b00020; font-size:.9rem;">{{ errors.get('max_upload_mb') }}</div>
+            {% endif %}
+        </div>
+        <div class="form-section">
+            <label for="allowed_extensions_csv">Allowed Extensions (comma-separated)</label>
+            <input type="text" id="allowed_extensions_csv" name="allowed_extensions_csv" value="{{ request.form.allowed_extensions_csv or settings.allowed_extensions_csv }}">
+            {% if errors and errors.get('allowed_extensions_csv') %}
+            <div style="color:#b00020; font-size:.9rem;">{{ errors.get('allowed_extensions_csv') }}</div>
+            {% endif %}
+        </div>
+        <div class="form-section">
+            <label for="rate_limit_per_min">Rate Limit (requests per minute)</label>
+            <input type="number" id="rate_limit_per_min" name="rate_limit_per_min" min="1" value="{{ request.form.rate_limit_per_min or settings.rate_limit_per_min }}">
+            {% if errors and errors.get('rate_limit_per_min') %}
+            <div style="color:#b00020; font-size:.9rem;">{{ errors.get('rate_limit_per_min') }}</div>
+            {% endif %}
+        </div>
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </form>
+</div>
+{% endblock %}
+
+
