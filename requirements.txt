@@ -1,0 +1,10 @@
+Flask
+Flask-SQLAlchemy
+Flask-Bcrypt
+Flask-Login
+pyotp
+qrcode
+Pillow
+python-dotenv
+cryptography
+google-generativeai

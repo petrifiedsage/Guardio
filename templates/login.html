@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Login - Guardio{% endblock %}
+{% block content %}
+<div class="content-card form-container">
+    <h1>Sign in</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+        {% for category, message in messages %}<div class="flash-{{ category }}">{{ message }}</div>{% endfor %}
+    {% endif %}{% endwith %}
+    <form method="post">
+        <div class="form-section">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required>
+        </div>
+        <div class="form-section">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        <div class="form-section">
+            <label for="otp">2FA Token (OTP)</label>
+            <input type="text" id="otp" name="otp" required minlength="6" maxlength="6" pattern="\d{6}">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Sign in</button>
+    </form>
+</div>
+{% endblock %}

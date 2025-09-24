@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Guardio - Secure Your Digital Life{% endblock %}
+
+{% block content %}
+<div class="hero">
+    <h1>A better internet starts with privacy and freedom</h1>
+    <p>Take control of your data with Guardio's end-to-end encryption.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="hero-buttons">
+        <a href="{{ url_for('signup') }}" class="btn btn-primary">Create a free account</a>
+        <a href="#" class="btn btn-secondary">Compare plans</a>
+    </div>
+</div>
+{% endblock %}

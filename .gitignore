@@ -1,0 +1,34 @@
+# Environment
+# Ignore the virtual environment folder
+venv/
+env/
+.venv/
+.env/
+
+# Secrets
+# Ignore the .env file containing secret keys
+.env
+
+# Database
+# Ignore the SQLite database file
+mfa_app.db
+
+# Python
+# Ignore Python cache files and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS-specific files
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
