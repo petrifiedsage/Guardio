@@ -1,14 +1,15 @@
 /* --- Global Styles & Variables --- */
 :root {
-    --primary-color: #6D5BDE; /* Proton Purple */
-    --primary-hover: #5A4ACC;
+    --primary-color: #5B6CFF; /* Bold Indigo */
+    --primary-hover: #4B59E6;
     --background-color: #F6F6F8;
     --content-background: #FFFFFF;
     --text-primary: #050505;
     --text-secondary: #555555;
     --border-color: #E0E0E0;
     --border-radius: 8px;
-    --box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+    --box-shadow: 0 12px 30px rgba(20, 25, 40, 0.08);
+    --elevate: 0 14px 34px rgba(20,25,40,.12);
 }
 
 body {
@@ -17,6 +18,8 @@ body {
     background-color: var(--background-color);
     color: var(--text-primary);
     line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 .container {
@@ -28,11 +31,12 @@ body {
 /* --- Header & Navigation --- */
 .header {
     background-color: var(--content-background);
-    padding: 15px 0;
+    padding: 18px 0;
     border-bottom: 1px solid var(--border-color);
     position: sticky;
     top: 0;
     z-index: 1000;
+    backdrop-filter: saturate(180%) blur(10px);
 }
 
 .nav {
@@ -42,8 +46,8 @@ body {
 }
 
 .logo {
-    font-size: 1.5rem;
-    font-weight: 700;
+    font-size: 1.6rem;
+    font-weight: 800;
     color: var(--text-primary);
     text-decoration: none;
 }
@@ -53,11 +57,12 @@ body {
     text-decoration: none;
     margin-left: 25px;
     font-weight: 500;
-    transition: color 0.3s ease;
+    transition: color 0.2s ease, transform 0.2s ease;
 }
 
 .nav-links a:hover {
     color: var(--primary-color);
+    transform: translateY(-1px);
 }
 
 /* --- Buttons --- */
@@ -66,7 +71,7 @@ body {
     border-radius: var(--border-radius);
     text-decoration: none;
     font-weight: 600;
-    transition: all 0.3s ease;
+    transition: box-shadow .2s ease, transform .15s ease, background-color .2s ease, color .2s ease;
     border: none;
     cursor: pointer;
     display: inline-block;
@@ -75,11 +80,14 @@ body {
 .btn-primary {
     background-color: var(--primary-color);
     color: #fff;
+    box-shadow: 0 8px 20px rgba(91,108,255,.25);
 }
 
 .btn-primary:hover {
     background-color: var(--primary-hover);
     color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(75,89,230,.28);
 }
 
 .btn-secondary {
@@ -100,6 +108,11 @@ body {
     border-radius: var(--border-radius);
     box-shadow: var(--box-shadow);
     margin: 40px auto;
+    transition: box-shadow .2s ease, transform .15s ease;
+}
+
+.content-card:hover {
+    box-shadow: var(--elevate);
 }
 
 /* --- Forms --- */
@@ -108,8 +121,8 @@ body {
 }
 
 .form-container h1, .content-card h1 {
-    font-size: 2rem;
-    font-weight: 700;
+    font-size: 2.25rem;
+    font-weight: 800;
     margin-bottom: 20px;
 }
 
@@ -150,7 +163,7 @@ th, td {
 
 th {
     background-color: #f8f9fa;
-    font-weight: 600;
+    font-weight: 700;
 }
 
 tr:hover {
@@ -166,10 +179,12 @@ tr:hover {
 .flash-success {
     padding: 15px; border-radius: var(--border-radius); margin-bottom: 20px;
     background-color: #d4edda; color: #155724;
+    animation: fadeIn .25s ease;
 }
 .flash-danger {
     padding: 15px; border-radius: var(--border-radius); margin-bottom: 20px;
     background-color: #f8d7da; color: #721c24;
+    animation: fadeIn .25s ease;
 }
 
 /* --- Landing Page Hero --- */
@@ -179,8 +194,8 @@ tr:hover {
 }
 
 .hero h1 {
-    font-size: 3.5rem;
-    font-weight: 800;
+    font-size: 3.75rem;
+    font-weight: 900;
     margin-bottom: 20px;
 }
 
@@ -212,6 +227,7 @@ tr:hover {
     border-radius: 12px;
     box-shadow: var(--box-shadow);
     padding: 16px;
+    animation: riseIn .25s ease;
 }
 
 .chain-block.ack {
@@ -227,7 +243,7 @@ tr:hover {
 }
 
 .chain-index {
-    font-weight: 800;
+    font-weight: 900;
     color: var(--primary-color);
 }
 
@@ -302,4 +318,15 @@ tr:hover {
         transparent 6px,
         transparent 12px
     );
+}
+
+/* --- Animations --- */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes riseIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
 }

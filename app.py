@@ -4,6 +4,7 @@ import io
 import json
 import hashlib
 from datetime import datetime
+from time import time
 from dotenv import load_dotenv
 from functools import wraps
 
@@ -35,6 +36,11 @@ app.config['SECRET_KEY'] = SECRET_KEY
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///mfa_app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_timeout': 30}
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_UPLOAD_MB', '10')) * 1024 * 1024  # MB limit
+
+# Allowed file extensions for uploads
+ALLOWED_EXTENSIONS = set((os.getenv('ALLOWED_EXTENSIONS') or 'txt,pdf,png,jpg,jpeg,gif').split(','))
+ALLOWED_EXTENSIONS = {ext.strip().lower() for ext in ALLOWED_EXTENSIONS if ext.strip()}
 
 
 # --- AI and Encryption Setup ---
@@ -47,6 +53,23 @@ bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
+# --- Simple API Rate Limiter (per user or IP) ---
+RATE_LIMIT_PER_MIN = int(os.getenv('RATE_LIMIT_PER_MIN', '60'))
+_request_counts = {}
+
+@app.before_request
+def _rate_limit_guard():
+    identifier = None
+    if current_user.is_authenticated:
+        identifier = f"user:{current_user.id}"
+    else:
+        identifier = f"ip:{request.remote_addr}"
+    now = int(time() // 60)  # current minute bucket
+    key = (identifier, now)
+    _request_counts[key] = _request_counts.get(key, 0) + 1
+    if _request_counts[key] > RATE_LIMIT_PER_MIN:
+        return abort(429)
+
 # --- RBAC Decorator ---
 def admin_required(f):
     @wraps(f)
@@ -56,6 +79,13 @@ def admin_required(f):
             return redirect(url_for('dashboard'))
         return f(*args, **kwargs)
     return decorated_function
+
+# --- Helpers ---
+def allowed_file(filename):
+    if not filename or '.' not in filename:
+        return False
+    ext = filename.rsplit('.', 1)[1].lower()
+    return ext in ALLOWED_EXTENSIONS
 
 def analyze_file_with_ai(file_data, filename):
     """Sends file content to Gemini for analysis."""
@@ -268,6 +298,9 @@ def dashboard(folder_id):
             return redirect(request.url)
 
         if file:
+            if not allowed_file(file.filename):
+                flash('File type not allowed.', 'danger')
+                return redirect(request.url)
             file_data = file.read()
             encrypted_data = fernet.encrypt(file_data)
             
@@ -454,7 +487,84 @@ def delete_password(entry_id):
 def admin_dashboard():
     """Displays the admin dashboard with a list of all users."""
     users = User.query.all()
-    return render_template('admin_dashboard.html', users=users)
+    total_users = User.query.count()
+    total_files = File.query.count()
+    total_passwords = PasswordEntry.query.count()
+    latest_block = AuditBlock.query.order_by(AuditBlock.index.desc()).first()
+    latest_index = latest_block.index if latest_block else -1
+    config = {
+        'max_upload_mb': int(os.getenv('MAX_UPLOAD_MB', '10')),
+        'allowed_extensions': sorted(list(ALLOWED_EXTENSIONS)),
+        'rate_limit_per_min': RATE_LIMIT_PER_MIN,
+    }
+    return render_template('admin_dashboard.html', users=users, total_users=total_users, total_files=total_files, total_passwords=total_passwords, latest_index=latest_index, config=config)
+
+
+# --- Admin User Management ---
+@app.route('/admin/user/<int:user_id>/update', methods=['POST'])
+@login_required
+@admin_required
+def admin_update_user(user_id):
+    user = User.query.get_or_404(user_id)
+    new_username = request.form.get('username', user.username)
+    new_email = request.form.get('email', user.email)
+    new_role = request.form.get('role', user.role)
+    changes = {}
+    if new_username != user.username:
+        changes['username'] = {'from': user.username, 'to': new_username}
+        user.username = new_username
+    if new_email != user.email:
+        changes['email'] = {'from': user.email, 'to': new_email}
+        user.email = new_email
+    if new_role != user.role:
+        changes['role'] = {'from': user.role, 'to': new_role}
+        user.role = new_role
+    db.session.add(user)
+    append_audit('ADMIN_USER_UPDATE', {'user_id': user.id, 'changes': changes}, actor_user_id=current_user.id)
+    db.session.commit()
+    flash('User updated successfully.', 'success')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/<int:user_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def admin_delete_user(user_id):
+    if current_user.id == user_id:
+        flash('Admin cannot delete own account.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    user = User.query.get_or_404(user_id)
+    append_audit('ADMIN_USER_DELETE', {'user_id': user.id, 'username': user.username}, actor_user_id=current_user.id)
+    db.session.delete(user)
+    db.session.commit()
+    flash('User deleted successfully.', 'success')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/backup', methods=['POST'])
+@login_required
+@admin_required
+def admin_backup():
+    # Return a JSON bundle with core tables and configuration snapshot
+    users = [
+        {'id': u.id, 'username': u.username, 'email': u.email, 'role': u.role}
+        for u in User.query.all()
+    ]
+    blocks = [b.to_dict() for b in AuditBlock.query.order_by(AuditBlock.index.asc()).all()]
+    snapshot = {
+        'exported_at': datetime.utcnow().isoformat() + 'Z',
+        'config': {
+            'max_upload_mb': int(os.getenv('MAX_UPLOAD_MB', '10')),
+            'allowed_extensions': sorted(list(ALLOWED_EXTENSIONS)),
+            'rate_limit_per_min': RATE_LIMIT_PER_MIN,
+        },
+        'users': users,
+        'audit_blocks': blocks,
+    }
+    payload = json.dumps(snapshot, indent=2)
+    append_audit('ADMIN_BACKUP_EXPORT', {'user_count': len(users), 'block_count': len(blocks)}, actor_user_id=current_user.id)
+    db.session.commit()
+    return send_file(io.BytesIO(payload.encode('utf-8')), as_attachment=True, download_name='guardio_admin_backup.json', mimetype='application/json')
 
 @app.route('/admin/user/<int:user_id>')
 @login_required

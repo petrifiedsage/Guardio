@@ -5,9 +5,38 @@
 {% block content %}
 <div class="dashboard-container">
     <h1>Admin Dashboard</h1>
-    <p>Manage all users in the system.</p>
+    <p>System overview and user management.</p>
 
-    <div class="file-manager">
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+        {% for category, message in messages %}<div class="flash-{{ category }}">{{ message }}</div>{% endfor %}
+    {% endif %}{% endwith %}
+
+    <div class="content-card" style="margin: 20px 0;">
+        <h3>Summary</h3>
+        <div style="display:flex; gap:20px; flex-wrap:wrap;">
+            <div><strong>Total Users:</strong> {{ total_users }}</div>
+            <div><strong>Total Files:</strong> {{ total_files }}</div>
+            <div><strong>Total Password Entries:</strong> {{ total_passwords }}</div>
+            <div><strong>Latest Block Index:</strong> {{ latest_index }}</div>
+        </div>
+        <form action="{{ url_for('admin_backup') }}" method="post" style="margin-top:12px;">
+            <button type="submit" class="btn btn-secondary">Download Backup (JSON)</button>
+        </form>
+    </div>
+
+    <div class="content-card" style="margin: 20px 0;">
+        <h3>Security Posture</h3>
+        <ul>
+            <li><strong>MFA</strong>: Enabled for all users at signup (TOTP)</li>
+            <li><strong>Password Hashing</strong>: Bcrypt</li>
+            <li><strong>Encryption</strong>: Fernet (AES-128) for files and passwords</li>
+            <li><strong>Upload Policy</strong>: Max {{ config.max_upload_mb }}MB; Allowed: {{ ', '.join(config.allowed_extensions) }}</li>
+            <li><strong>Rate Limit</strong>: {{ config.rate_limit_per_min }} req/min per user/IP</li>
+            <li><strong>Audit Chain</strong>: Append-only, SHA-256 linked</li>
+        </ul>
+    </div>
+
+    <div class="file-manager content-card">
         <h3>All Users</h3>
         <table>
             <thead>
@@ -28,6 +57,21 @@
                     <td>{{ user.role }}</td>
                     <td>
                         <a href="{{ url_for('user_details', user_id=user.id) }}" class="btn-secondary" style="padding: 5px 10px;">View Details</a>
+                        <details style="display:inline-block; margin-left:8px;">
+                            <summary class="btn-secondary" style="display:inline-block; padding: 5px 10px; cursor:pointer;">Edit</summary>
+                            <form action="{{ url_for('admin_update_user', user_id=user.id) }}" method="post" style="margin-top:8px;">
+                                <input type="text" name="username" value="{{ user.username }}" placeholder="Username" />
+                                <input type="email" name="email" value="{{ user.email or '' }}" placeholder="Email" />
+                                <select name="role">
+                                    <option value="user" {% if user.role=='user' %}selected{% endif %}>user</option>
+                                    <option value="admin" {% if user.role=='admin' %}selected{% endif %}>admin</option>
+                                </select>
+                                <button type="submit" class="btn btn-primary" style="margin-left:8px;">Save</button>
+                            </form>
+                        </details>
+                        <form action="{{ url_for('admin_delete_user', user_id=user.id) }}" method="post" style="display:inline-block; margin-left:8px;" onsubmit="return confirm('Delete user {{ user.username }}? This cannot be undone.');">
+                            <button type="submit" class="btn btn-secondary" style="padding: 5px 10px; color:#dc3545; border-color:#dc3545;">Delete</button>
+                        </form>
                     </td>
                 </tr>
                 {% endfor %}
