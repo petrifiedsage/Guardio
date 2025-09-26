@@ -545,20 +545,75 @@ def delete_password(entry_id):
 @login_required
 @admin_required
 def admin_dashboard():
-    """Admin dashboard with system metrics and quick links."""
+    """Displays the admin dashboard with comprehensive system analytics."""
+    # Ensure this function is defined, imported, or accessible
+    # from the AuditBlock model (as it was in the original project)
+    from sqlalchemy import func
+
     users = User.query.all()
-    total_users = User.query.count()
+    
+    # Calculate system statistics
+    total_users = len(users)
+    admin_users = len([u for u in users if u.role == 'admin'])
+    regular_users = total_users - admin_users
+    
+    # File statistics
     total_files = File.query.count()
-    total_passwords = PasswordEntry.query.count()
-    latest_block = AuditBlock.query.order_by(AuditBlock.index.desc()).first()
-    latest_index = latest_block.index if latest_block else -1
-    limits = get_effective_limits()
-    config = {
-        'max_upload_mb': limits['max_upload_mb'],
-        'allowed_extensions': sorted(list(limits['allowed_extensions'])),
-        'rate_limit_per_min': limits['rate_limit_per_min'],
+    total_folders = Folder.query.count()
+    total_password_entries = PasswordEntry.query.count()
+    
+    # Storage statistics (approximate) - Added safer check
+    total_storage_mb = 0
+    for file in File.query.all():
+        if file.data:
+            total_storage_mb += len(file.data) / (1024 * 1024)  # Convert bytes to MB
+    
+    # User activity (files per user)
+    user_stats = []
+    for user in users:
+        file_count = len(user.files)
+        folder_count = len(user.folders)
+        password_count = len(user.password_entries)
+        
+        # Get audit chain status
+        try:
+            # Reusing the existing function to get audit summary
+            audit_summary = get_audit_chain_summary(user.id)
+            audit_blocks = audit_summary['total_blocks']
+            chain_valid = audit_summary['chain_valid']
+        except Exception as e:
+            # Handle case when audit system isn't fully set up
+            audit_blocks = 0
+            chain_valid = False
+        
+        user_stats.append({
+            'user': user,
+            'file_count': file_count,
+            'folder_count': folder_count,
+            'password_count': password_count,
+            'audit_blocks': audit_blocks,
+            'chain_valid': chain_valid
+        })
+    
+    # Sort users by activity
+    user_stats.sort(key=lambda x: x['file_count'] + x['password_count'], reverse=True)
+    
+    stats = {
+        'total_users': total_users,
+        'admin_users': admin_users,
+        'regular_users': regular_users,
+        'total_files': total_files,
+        'total_folders': total_folders,
+        'total_password_entries': total_password_entries,
+        'total_storage_mb': round(total_storage_mb, 2),
+        # Assuming you don't have separate logic for "recent," just use total counts for placeholder
+        'recent_files': total_files, 
+        'recent_passwords': total_password_entries,
+        'user_stats': user_stats
     }
-    return render_template('admin_dashboard.html', users=users, total_users=total_users, total_files=total_files, total_passwords=total_passwords, latest_index=latest_index, config=config)
+    
+    # FIX: Ensure 'stats' is passed in the render_template call
+    return render_template('admin_dashboard.html', users=users, stats=stats)
 
 
 # --- Admin User Management ---

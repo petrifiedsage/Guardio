@@ -4,24 +4,20 @@
 <div class="content-card">
     <h1>My Files</h1>
     <p>Welcome, <strong>{{ current_user.username }}</strong>! Manage your encrypted files and folders below.</p>
-    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
-        {% for category, message in messages %}<div class="flash-{{ category }}">{{ message }}</div>{% endfor %}
-    {% endif %}{% endwith %}
 
-    <!-- FIX: Added back the actions bar for creating folders and uploading files -->
-    <div class="actions-bar" style="margin-top: 20px;">
-        <form action="{{ url_for('create_folder') }}" method="post" style="display: flex; gap: 10px; align-items: center;">
+    <div class="actions-bar" style="display: flex; gap: 1rem; margin-top: 2rem; flex-wrap: wrap;">
+        <form action="{{ url_for('create_folder') }}" method="post" style="display: flex; gap: 0.5rem; align-items: center;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="parent_id" value="{{ current_folder.id if current_folder else '' }}">
             <input type="text" name="folder_name" placeholder="New folder name..." required>
             <button type="submit" class="btn btn-secondary">Create Folder</button>
         </form>
-        <form method="post" enctype="multipart/form-data" style="display: flex; gap: 10px; align-items: center;">
+        <form method="post" enctype="multipart/form-data" style="display: flex; gap: 0.5rem; align-items: center;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="file" name="file" required>
-            <div style="display: flex; align-items: center; gap: 5px;">
+            <div style="display: flex; align-items: center; gap: 0.25rem;">
                 <input type="checkbox" id="analyze_file" name="analyze_file" value="true">
-                <label for="analyze_file" style="display: inline; font-weight: normal;">Analyze with AI</label>
+                <label for="analyze_file" style="font-weight: normal;">Analyze with AI</label>
             </div>
             <button type="submit" class="btn btn-primary">Upload File</button>
         </form>
@@ -66,7 +62,7 @@
                     <td>📄 {{ file.filename }}</td>
                     <td><em>{{ file.ai_summary or 'Not analyzed' }}</em></td>
                     <td>
-                        <a href="{{ url_for('download_file', file_id=file.id) }}" class="btn-secondary" style="padding: 5px 10px;">Download</a>
+                        <a href="{{ url_for('download_file', file_id=file.id) }}" class="btn btn-secondary" style="padding: 5px 10px;">Download</a>
                         <form action="{{ url_for('delete_file', file_id=file.id) }}" method="post" style="display: inline;" onsubmit="return confirm('Are you sure?');">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="delete-btn">Delete</button>
