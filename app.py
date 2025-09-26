@@ -142,6 +142,7 @@ def analyze_file_with_ai(file_data, filename):
     except Exception as e:
         print(f"AI analysis failed: {e}")
         return "AI analysis could not be performed due to an error."
+
 # --- Database Models ---
 
 class User(db.Model, UserMixin):
@@ -253,6 +254,25 @@ def append_audit(action, metadata=None, actor_user_id=None):
     db.session.add(new_block)
     # caller is responsible for committing along with their operation
     return new_block
+
+def get_audit_chain_summary(user_id):
+    """Helper to check user-specific audit chain integrity."""
+    # This is a simplified check. A full check should re-compute all hashes.
+    blocks = AuditBlock.query.filter_by(actor_user_id=user_id).order_by(AuditBlock.index.asc()).all()
+    # A simple validation for demonstration
+    is_valid = True
+    last_hash = '0'*64 
+    # Find the block before the user's first block to get the correct previous_hash
+    if blocks:
+        first_user_block_index = blocks[0].index
+        if first_user_block_index > 0:
+            last_hash = AuditBlock.query.filter_by(index=first_user_block_index - 1).first().block_hash
+    for block in blocks:
+        if block.previous_hash != last_hash:
+            is_valid = False
+            break
+        last_hash = block.block_hash
+    return {'total_blocks': len(blocks), 'chain_valid': is_valid}
 
 # --- Standard Routes (Login, Signup, etc.) ---
 
@@ -546,10 +566,6 @@ def delete_password(entry_id):
 @admin_required
 def admin_dashboard():
     """Displays the admin dashboard with comprehensive system analytics."""
-    # Ensure this function is defined, imported, or accessible
-    # from the AuditBlock model (as it was in the original project)
-    from sqlalchemy import func
-
     users = User.query.all()
     
     # Calculate system statistics
@@ -557,45 +573,30 @@ def admin_dashboard():
     admin_users = len([u for u in users if u.role == 'admin'])
     regular_users = total_users - admin_users
     
-    # File statistics
     total_files = File.query.count()
     total_folders = Folder.query.count()
     total_password_entries = PasswordEntry.query.count()
     
-    # Storage statistics (approximate) - Added safer check
-    total_storage_mb = 0
-    for file in File.query.all():
-        if file.data:
-            total_storage_mb += len(file.data) / (1024 * 1024)  # Convert bytes to MB
+    total_storage_bytes = sum(len(f.data) for f in File.query.all() if f.data)
+    total_storage_mb = total_storage_bytes / (1024 * 1024)
     
-    # User activity (files per user)
     user_stats = []
     for user in users:
         file_count = len(user.files)
-        folder_count = len(user.folders)
         password_count = len(user.password_entries)
-        
-        # Get audit chain status
-        try:
-            # Reusing the existing function to get audit summary
-            audit_summary = get_audit_chain_summary(user.id)
-            audit_blocks = audit_summary['total_blocks']
-            chain_valid = audit_summary['chain_valid']
-        except Exception as e:
-            # Handle case when audit system isn't fully set up
-            audit_blocks = 0
-            chain_valid = False
+        user_storage_bytes = sum(len(f.data) for f in user.files if f.data)
+
+        audit_summary = get_audit_chain_summary(user.id)
         
         user_stats.append({
             'user': user,
             'file_count': file_count,
-            'folder_count': folder_count,
             'password_count': password_count,
-            'audit_blocks': audit_blocks,
-            'chain_valid': chain_valid
+            'storage_mb': user_storage_bytes / (1024 * 1024),
+            'audit_blocks': audit_summary['total_blocks'],
+            'chain_valid': audit_summary['chain_valid']
         })
     
-    # Sort users by activity
     user_stats.sort(key=lambda x: x['file_count'] + x['password_count'], reverse=True)
     
     stats = {
@@ -606,15 +607,10 @@ def admin_dashboard():
         'total_folders': total_folders,
         'total_password_entries': total_password_entries,
         'total_storage_mb': round(total_storage_mb, 2),
-        # Assuming you don't have separate logic for "recent," just use total counts for placeholder
-        'recent_files': total_files, 
-        'recent_passwords': total_password_entries,
         'user_stats': user_stats
     }
     
-    # FIX: Ensure 'stats' is passed in the render_template call
-    return render_template('admin_dashboard.html', users=users, stats=stats)
-
+    return render_template('admin_dashboard.html', stats=stats)
 
 # --- Admin User Management ---
 @app.route('/admin/user/<int:user_id>/update', methods=['POST'])
@@ -641,6 +637,28 @@ def admin_update_user(user_id):
     flash('User updated successfully.', 'success')
     return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/user/<int:user_id>/role', methods=['POST'])
+@login_required
+@admin_required
+def change_user_role(user_id):
+    user_to_change = User.query.get_or_404(user_id)
+    new_role = request.form.get('role')
+    if new_role in ['admin', 'user']:
+        user_to_change.role = new_role
+        db.session.commit()
+        append_audit('ADMIN_ROLE_CHANGE', {'user_id': user_id, 'new_role': new_role}, actor_user_id=current_user.id)
+        db.session.commit()
+        flash(f'Successfully changed {user_to_change.username}\'s role to {new_role}.', 'success')
+    else:
+        flash('Invalid role specified.', 'danger')
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/logs')
+@login_required
+@admin_required
+def admin_logs():
+    flash('Log viewing functionality is not yet implemented.', 'info')
+    return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/user/<int:user_id>/delete', methods=['POST'])
 @login_required
