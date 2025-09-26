@@ -1,6 +1,6 @@
 # Guardio: Your Private, End-to-End Encrypted Cloud
 
-![Guardio Landing Page](static/ff_qr.png)
+![Guardio Landing Page](https://placehold.co/1200x600/6D5BDE/FFFFFF?text=Guardio)
 
 **Guardio is a full-stack, security-first web application that gives you total control over your digital life. It combines an encrypted file manager and a secure password vault, all protected by robust Multi-Factor Authentication (MFA).**
 
