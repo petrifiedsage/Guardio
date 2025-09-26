@@ -131,17 +131,24 @@ def get_effective_limits():
         'rate_limit_per_min': RATE_LIMIT_PER_MIN,
     }
 
-def analyze_file_with_ai(file_data, filename):
-    """Sends file content to Gemini for analysis."""
+def analyze_file_with_ai(file_data, filename, mime_type):
+    """Sends file content to Gemini for analysis using Parts API for multimodality."""
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        content_preview = file_data.decode('utf-8', errors='ignore')
-        prompt = f"Analyze the following file content from a file named '{filename}'. Provide a one-sentence summary and state if it appears safe or potentially malicious. Content preview: {content_preview[:2000]}"
-        response = model.generate_content(prompt)
+
+        # Use the Part object to send raw bytes and their mime type
+        file_part = genai.Part.from_data(data=file_data, mime_type=mime_type)
+
+        prompt_parts = [
+            file_part,
+            f"\n\nAnalyze the content of the attached file ('{filename}'). Provide a one-sentence summary and state if it appears safe or potentially malicious."
+        ]
+        response = model.generate_content(prompt_parts)
         return response.text
     except Exception as e:
         print(f"AI analysis failed: {e}")
-        return "AI analysis could not be performed due to an error."
+        # Provide a more specific error message in the flash message
+        return f"AI analysis failed. Error: {str(e)}"
 
 # --- Database Models ---
 
@@ -289,13 +296,11 @@ def signup():
         password = request.form.get('password')
         email = request.form.get('email')
 
-        # FIX: Separate checks for username and email to handle blank emails correctly
         user_by_username = User.query.filter_by(username=username).first()
         if user_by_username:
             flash('Username already exists. Please choose another.', 'danger')
             return redirect(url_for('signup'))
 
-        # Only check for email uniqueness if an email is provided
         if email:
             user_by_email = User.query.filter_by(email=email).first()
             if user_by_email:
@@ -314,21 +319,32 @@ def signup():
             otp_secret=otp_secret,
             role=role
         )
-        db.session.add(new_user)
-        # Audit: user signup (commit with user)
-        append_audit('USER_SIGNUP', {'username': username, 'email_provided': bool(email)}, actor_user_id=new_user.id)
-        db.session.commit()
+        
+        try:
+            db.session.add(new_user)
+            db.session.flush()  # Use flush() to assign an ID to new_user
 
-        flash(f'Account created successfully! Your role is: {role}. Please set up MFA.', 'success')
+            # Now new_user.id is available for the audit log
+            append_audit('USER_SIGNUP', {'username': username, 'email_provided': bool(email)}, actor_user_id=new_user.id)
+            
+            db.session.commit() # Commit both the user and the audit log together
 
-        provisioning_uri = pyotp.totp.TOTP(otp_secret).provisioning_uri(name=username, issuer_name='FlaskMFAApp')
-        qr_img = qrcode.make(provisioning_uri)
-        buffered = io.BytesIO()
-        qr_img.save(buffered, format="PNG")
-        qr_code_img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return render_template('show_qr.html', qr_code_img=qr_code_img_str)
+            flash(f'Account created successfully! Your role is: {role}. Please set up MFA.', 'success')
+
+            provisioning_uri = pyotp.totp.TOTP(otp_secret).provisioning_uri(name=username, issuer_name='FlaskMFAApp')
+            qr_img = qrcode.make(provisioning_uri)
+            buffered = io.BytesIO()
+            qr_img.save(buffered, format="PNG")
+            qr_code_img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            return render_template('show_qr.html', qr_code_img=qr_code_img_str)
+            
+        except Exception as e:
+            db.session.rollback()
+            # Optionally log the error e
+            flash('An error occurred during signup. Please try again.', 'danger')
+            return redirect(url_for('signup'))
+
     return render_template('signup.html')
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -338,22 +354,25 @@ def login():
         password = request.form.get('password')
         otp = request.form.get('otp')
         user = User.query.filter_by(username=username).first()
-        if user and bcrypt.check_password_hash(user.password_hash, password):
-            totp = pyotp.TOTP(user.otp_secret)
-            if totp.verify(otp):
-                login_user(user)
-                flash('Logged in successfully!', 'success')
-                # Audit: successful login
-                append_audit('USER_LOGIN', {'username': username}, actor_user_id=user.id)
-                db.session.commit()
-                return redirect(url_for('dashboard'))
-            else:
-                flash('Invalid 2FA token. Please try again.', 'danger')
-        else:
-            flash('Invalid username or password. Please try again.', 'danger')
-        return redirect(url_for('login'))
-    return render_template('login.html')
 
+        # Separated checks for clearer error messages
+        if not user or not bcrypt.check_password_hash(user.password_hash, password):
+            flash('Invalid username or password. Please try again.', 'danger')
+            return redirect(url_for('login'))
+
+        totp = pyotp.TOTP(user.otp_secret)
+        if not totp.verify(otp):
+            flash('Invalid 2FA token. Please try again.', 'danger')
+            return redirect(url_for('login'))
+
+        # If we reach here, all checks have passed
+        login_user(user)
+        flash('Logged in successfully!', 'success')
+        append_audit('USER_LOGIN', {'username': username}, actor_user_id=user.id)
+        db.session.commit()
+        return redirect(url_for('dashboard'))
+
+    return render_template('login.html')
 # --- File Manager Routes ---
 
 @app.route('/dashboard', defaults={'folder_id': None}, methods=['GET', 'POST'])
@@ -385,8 +404,8 @@ def dashboard(folder_id):
             ai_summary = None
             if analyze:
                 try:
-                    decrypted_data_for_ai = fernet.decrypt(encrypted_data)
-                    ai_summary = analyze_file_with_ai(decrypted_data_for_ai, file.filename)
+                    # Pass the file's mime_type to the analysis function
+                    ai_summary = analyze_file_with_ai(file_data, file.filename, file.mimetype)
                 except Exception as e:
                     ai_summary = f"Could not perform AI analysis. Error: {e}"
 
