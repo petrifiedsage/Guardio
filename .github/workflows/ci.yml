@@ -25,5 +25,5 @@ jobs:
           ENCRYPTION_KEY: dGVzdGdlbmVyYXRlZGVuY3J5cHRpb25rZXk=
           GEMINI_API_KEY: dummy
         run: |
-          pytest -q
+          python -m pytest -q 
 
