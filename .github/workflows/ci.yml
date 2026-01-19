@@ -22,7 +22,7 @@ jobs:
       - name: Run tests
         env:
           SECRET_KEY: test
-          ENCRYPTION_KEY: dGVzdGdlbmVyYXRlZGVuY3J5cHRpb25rZXk=
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           GEMINI_API_KEY: dummy
         run: |
           python -m pytest -q 

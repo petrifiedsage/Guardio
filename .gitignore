@@ -1,6 +1,6 @@
 # Environment
 # Ignore the virtual environment folder
-venv/
+/venv/
 env/
 .venv/
 .env/
