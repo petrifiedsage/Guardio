@@ -3,9 +3,24 @@
 {% block title %}Guardio - Secure Your Digital Life{% endblock %}
 
 {% block content %}
-<div class="hero">
-    <h1>A better internet starts with privacy and freedom</h1>
-    <p>Take control of your data with Guardio's end-to-end encryption.</p>
+
+<div class="background-container">
+    <div class="bubbles">
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+        <span class="bubble"></span>
+    </div>
+</div>
+
+<div class="hero"> <h1 id="hero-h1">A better internet starts with privacy and freedom</h1>
+    <p id="hero-p">Take control of your data with Guardio's end-to-end encryption.</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

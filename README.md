@@ -22,6 +22,25 @@ Guardio is built on the principle of zero-knowledge privacy. We can't see your d
     * **Zero-Knowledge:** Just like your files, your passwords are encrypted before being saved. The "Reveal" function decrypts them on-the-fly, only for you.
 
 * 🛡️ **Admin Oversight (RBAC):**
+    * Admin dashboard with summary stats, backup export, security posture
+    * User management (edit role/email/username, delete) with audit logging
+    * Configurable limits via Admin Settings (upload size, allowed extensions, rate limits)
+
+### Audit Blockchain
+
+All audit events are stored in a single, append-only blockchain with SHA-256 linking between blocks. Users can:
+
+- Per-user visibility: users see only their own actions + genesis; admin sees all
+- Export JSON (user scope or full scope for admin)
+- Save a personal snapshot marker indicating the latest block they have acknowledged
+ - Visual chain UI with linked blocks and expandable metadata
+ - Integrity badge (Verified/Warning) by recomputing chained hashes
+
+Implementation details:
+
+- Models: `AuditBlock`, `UserAuditMarker`
+- Helper: `append_audit(action, metadata, actor_user_id)` computes and stores chained hashes
+- Genesis block is created automatically on first run
     * The first user to register automatically becomes the **Admin**.
     * The admin panel provides a high-level overview of all registered users and allows the admin to see *what* is being stored (e.g., filenames, password entry websites) but not the encrypted content itself, respecting user privacy while allowing for system management.
 
@@ -36,7 +55,8 @@ Guardio is built with a focus on security, reliability, and modern development p
 | **Backend** | Python, Flask                            | Core application logic and routing.              |
 | **Database** | SQLite via Flask-SQLAlchemy              | Data persistence for users, files, and passwords.|
 | **Security** | Flask-Bcrypt, `cryptography`, `pyotp`    | Password hashing, data encryption, and MFA.      |
-| **Frontend** | HTML, CSS (with Jinja2 Templating)       | User interface and design.                       |
+| **Frontend** | HTML, CSS (with Jinja2 Templating)       | User interface and design (light/dark themes).   |
+| **Rate limiting** | Simple in-memory limiter             | Per-minute limits by user/IP.                    |
 
 ---
 
@@ -59,8 +79,7 @@ Follow these steps to set up and run a local instance of Guardio.
 2.  **Activate Virtual Environment:**
     ```bash
     python3 -m venv venv
-    source venv/bin/activate  #for linux
-    venv\Scripts\activate.bat #for windows
+    source venv/bin/activate
     ```
 
 3.  **Install Dependencies:**
@@ -78,6 +97,11 @@ Follow these steps to set up and run a local instance of Guardio.
         ```
         SECRET_KEY='a_strong_random_string_for_flask_sessions'
         ENCRYPTION_KEY='your_generated_key_from_the_command_above'
+        GEMINI_API_KEY='your_gemini_api_key_here'
+        # Optional runtime limits (overridden by Admin Settings if present)
+        MAX_UPLOAD_MB=10
+        ALLOWED_EXTENSIONS='txt,pdf,png,jpg,jpeg,gif'
+        RATE_LIMIT_PER_MIN=60
         ```
 
 5.  **Initialize the Database:**
@@ -91,4 +115,53 @@ Follow these steps to set up and run a local instance of Guardio.
     flask run
     ```
     Guardio is now running at `http://127.0.0.1:5000`. The first account you create will be the admin.
+
+7.  **Admin Settings (optional):**
+    - Log in as admin, open Admin Panel → Open Settings.
+    - Adjust upload size, allowed file extensions, and rate limiting.
+
+8.  **Themes:**
+    - Toggle dark/light theme from the header (persists in localStorage).
+
+---
+
+## 🧪 Testing
+
+### Run tests
+
+```bash
+pip install -r requirements.txt
+pip install pytest
+pytest -q
+```
+
+### Manual test guide
+
+1. Register users and verify MFA
+2. Upload/download/delete files (exercise limits and disallowed extensions)
+3. Add/reveal/delete password entries
+4. Admin: edit/delete users, backup, and change settings
+5. Audit: confirm per-user visibility, export scope, and integrity badge
+
+---
+
+## 🔐 Security Highlights
+
+- MFA (TOTP), bcrypt password hashing, Fernet encryption
+- CSRF protection and per-minute rate limiting
+- Blockchain-inspired audit with SHA-256 linking and verification
+- Role-based access and scoped audit visibility
+
+## 💼 Business Value
+
+- Tamper-evident compliance trail
+- Zero-knowledge encrypted storage and vault
+- Admin oversight with configurable guardrails
+
+## 📚 Learning Outcomes
+
+- Secure authentication, RBAC, CSRF in Flask
+- Tamper-evident audit design and verification
+- Theming (light/dark), toasts, and UX patterns
+- Testing/CI foundations
 
