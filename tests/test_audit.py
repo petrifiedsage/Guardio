@@ -24,6 +24,10 @@ def test_compute_block_hash_deterministic(client):
 
 def test_chain_integrity_ok(client):
     with app.app_context():
+        # Clear any automatically created genesis block to start fresh
+        db.session.query(AuditBlock).delete()
+        db.session.commit()
+
         prev = '0'*64
         # create simple 2-block chain
         for idx in range(2):
